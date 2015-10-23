@@ -2,12 +2,16 @@ package hooks
 
 import (
 	"bytes"
-	"io"
+	"errors"
+	"fmt"
 	"io/ioutil"
+	"os"
 	"os/exec"
 	"regexp"
 
+	"github.com/google/shlex"
 	"github.com/tftp-go-team/hooktftp/src/logger"
+	"github.com/tftp-go-team/libgotftp/src"
 )
 
 // Borrowed from Ruby
@@ -15,12 +19,33 @@ import (
 var shellEscape = regexp.MustCompile("([^A-Za-z0-9_\\-.,:\\/@\n])")
 
 var ShellHook = HookComponents{
-	func(command string) (io.ReadCloser, int, error) {
-		cmd := exec.Command("sh", "-c", command)
+	func(command string, request tftp.Request) (*HookResult, error) {
+
+		if len(command) == 0 {
+			return nil, errors.New("Empty shell command")
+		}
+
+		split, err := shlex.Split(command)
+		if err != nil {
+			return nil, err
+		}
+
+		cmd := exec.Command(split[0], split[1:]...)
+
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
-			return nil, -1, err
+			return nil, err
 		}
+
+		stderr, err := cmd.StderrPipe()
+		if err != nil {
+			return nil, err
+		}
+
+		env := os.Environ()
+		env = append(env, fmt.Sprintf("CLIENT_ADDR=%s", (*request.Addr).String()))
+		cmd.Env = env
+
 		err = cmd.Start()
 
 		// Buffering content to avoid Reader closing after cmd.Wait()
@@ -29,9 +54,14 @@ var ShellHook = HookComponents{
 		// Note:
 		//    This is not a perfect solution because of buffering. (Memory usage...)
 		//    If you have better solution ...
-		out, err := ioutil.ReadAll(stdout)
+		outOutput, err := ioutil.ReadAll(stdout)
 		if err != nil {
 			logger.Err("Shell output buffering failed: %v", err)
+		}
+
+		errOutput, err := ioutil.ReadAll(stderr)
+		if err != nil {
+			logger.Err("Shell stderr output buffering failed: %v", err)
 		}
 
 		// Use goroutine to log the exit status for debugging purposes.
@@ -46,7 +76,12 @@ var ShellHook = HookComponents{
 			}
 		}()
 
-		return ioutil.NopCloser(bytes.NewReader(out)), -1, err
+		return newHookResult(
+			ioutil.NopCloser(bytes.NewReader(outOutput)),
+			ioutil.NopCloser(bytes.NewReader(errOutput)),
+			-1,
+		), err
+
 	},
 	func(s string) string {
 		return shellEscape.ReplaceAllStringFunc(s, func(s string) string {
