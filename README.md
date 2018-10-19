@@ -1,5 +1,7 @@
 # hooktftp
 
+[![GuardRails badge](https://badges.production.guardrails.io/moul/hooktftp.svg)](https://www.guardrails.io)
+
 Hooktftp is a dynamic read-only TFTP server. It's dynamic in a sense it is
 executes hooks matched on read requests (RRQ) instead of reading files from
 the file system. Hooks are matched with regular expressions and on match
